@@ -47,7 +47,7 @@ class DocumentProcessor:
     def clean_markdown(self, text: str) -> str:
         """Clean markdown formatting but preserve structure"""
         # remove markdown headers but keep as sections
-        #text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+        text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
         # remove bold/italic markers
         text = re.sub(r'\*{1,2}([^*]+)\*{1,2}', r'\1', text)
         # remove links but keep text
