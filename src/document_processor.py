@@ -5,7 +5,7 @@ Handles text extraction, chunking, and preprocessing
 import os
 import re
 from pathlib import Path
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Union
 import PyPDF2
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.docstore.document import Document
@@ -30,7 +30,8 @@ class DocumentProcessor:
                     text += page.extract_text() + "\n"
                 return text.strip()
         except Exception as e:
-            print(f"Error reading PDF ")
+            print(f"Error reading PDF {pdf_path}: {str(e)}")
+            return ""
 
     def extract_text_from_md(self, md_path: str) -> str:
         """Extract text from Markdown file"""
@@ -81,7 +82,7 @@ class DocumentProcessor:
             
         return documents
     
-    def process_documents(self, file_path: str) -> List[Document]:
+    def process_documents(self, file_path: Union[str, Path]) -> List[Document]:
         """Process single document and return chunks"""
         file_path = Path(file_path)
 
@@ -133,13 +134,13 @@ class DocumentProcessor:
                 "sources": []
             }
         total_chars = sum(len(doc.page_content) for doc in documents)
-        # Use list() to create a list instance, not typing.List
+        # use list() to create a list instance, not typing.List
         sources = list(set(doc.metadata.get("source", "unknown") for doc in documents))
 
         return {
             "total_chunks": len(documents),
             "total_characters": total_chars,
-            "avg_chunk_size": total_chars // len(documents) if documents else 0,
+            "avg_chunk_size": total_chars // len(documents),
             "sources": sources
         }
     
