@@ -11,6 +11,9 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.docstore.document import Document
 import config
 
+# Regex for md headings
+HEADING_RE = re.compile(r'^(#{1,6})\s+(.*)$')
+
 class DocumentProcessor:
     """Process various document formats for RAG system"""
     def __init__(self):
@@ -33,6 +36,21 @@ class DocumentProcessor:
             print(f"Error reading PDF {pdf_path}: {str(e)}")
             return ""
 
+    def extract_pages_from_pdf(self, pdf_path: str) -> List[Tuple[int, str]]:
+        """Extract pages from PDF"""
+        try:
+            import PyPDF2
+            pages = []
+            with open(pdf_path, 'rb') as f:
+                reader = PyPDF2.PdfReader(f)
+                for i, page in enumerate(reader.pages, start=1):
+                    txt = page.extract_text() or ""
+                    pages.append((i, txt))
+            return pages
+        except Exception as e:
+            print(f"Error reading PDF {pdf_path}: {e}")
+            return []
+
     def extract_text_from_md(self, md_path: str) -> str:
         """Extract text from Markdown file"""
         try:
@@ -47,15 +65,51 @@ class DocumentProcessor:
         
     def clean_markdown(self, text: str) -> str:
         """Clean markdown formatting but preserve structure"""
-        # remove markdown headers but keep as sections
+        # remove markdown headers (NOT md citation)
         text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
         # remove bold/italic markers
         text = re.sub(r'\*{1,2}([^*]+)\*{1,2}', r'\1', text)
+        # remove inline code markers
+        text = re.sub(r'`([^`]+)`', r'\1', text)
         # remove links but keep text
         text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
         # clean up extra whitespace
         text = re.sub(r'\n{3,}', '\n\n', text)
         return text.strip()
+    
+    def _parse_md_sections(self, raw: str) -> List[Tuple[int, str, str]]:
+        """Parse Markdown into sections by headings. Returns list of (level, title, body).
+        Content before the first heading becomes level 0 'Introduction'"""
+        lines = raw.splitlines()
+        sections: List[Tuple[int, str, str]] = []
+        lvl, title, body = 0, "Introduction", []
+
+        def flush():
+            if body:
+                sections.append((lvl, title.strip() or "Introduction", "\n".join(body).strip()))
+
+        for line in lines:
+            m = HEADING_RE.match(line)
+            if m:
+                flush()
+                lvl = len(m.group(1))
+                title = m.group(2).strip()
+                body = []
+            else:
+                body.append(line)
+        flush()
+        return sections
+
+    def _clean_inline_md(self, text: str) -> str:
+        """Clean inline markdown WITHOUT removing headings 
+        (used after section split)"""
+        t = text
+        # keep headings out of section bodies already, mild cleanup here:
+        t = re.sub(r'\*{1,2}([^*]+)\*{1,2}', r'\1', t)           # bold/italic
+        t = re.sub(r'`([^`]+)`', r'\1', t)                        # inline code
+        t = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', t)            # links
+        t = re.sub(r'\n{3,}', '\n\n', t)
+        return t.strip()
     
     def chunk_document(self, text: str, source: str = "") -> List[Document]:
         """Split document into chunks for vector storage"""
@@ -89,24 +143,74 @@ class DocumentProcessor:
         if not file_path.exists():
             print(f"File not found: {file_path}")
             return []
-        
-        # extract text based on file type
-        if file_path.suffix.lower() == '.pdf':
+
+        suffix = file_path.suffix.lower()
+
+        # PDF: flat extraction 
+        if suffix == '.pdf':
             text = self.extract_text_from_pdf(str(file_path))
-        elif file_path.suffix.lower() in ['.md', '.txt']:
-            text = self.extract_text_from_md(str(file_path))
+            if not text:
+                print(f"No text extracted from {file_path}")
+                return []
+            documents = self.chunk_document(text, source=str(file_path))
+
+        # MD: section-aware parsing for good citations
+        elif suffix in ['.md', '.markdown']:
+            try:
+                raw = file_path.read_text(encoding="utf-8", errors="ignore")
+            except Exception as e:
+                print(f"Error reading markdown {file_path}: {e}")
+                return []
+
+            sections = self._parse_md_sections(raw)
+            documents: List[Document] = []
+
+            # breadcrumb stack for nested headings
+            breadcrumb: List[Tuple[int, str]] = []
+            for sec_idx, (lvl, sec_title, sec_body) in enumerate(sections):
+                # update breadcrumb (only for lvl > 0)
+                while breadcrumb and breadcrumb[-1][0] >= lvl and lvl > 0:
+                    breadcrumb.pop()
+                if lvl > 0:
+                    breadcrumb.append((lvl, sec_title))
+
+                path_titles = [t for _, t in breadcrumb] if breadcrumb else [sec_title]
+                section_path = " » ".join(path_titles) if path_titles else (sec_title or "Introduction")
+
+                # clean inline markdown inside the section body
+                body_clean = self._clean_inline_md(sec_body or "")
+
+                # chunk within this section and attach metadata for citations
+                chunks = self.text_splitter.split_text(body_clean)
+                for chunk_i, chunk in enumerate(chunks):
+                    c = chunk.strip()
+                    if len(c) < 50:
+                        continue
+                    documents.append(Document(
+                        page_content=c,
+                        metadata={
+                            "source": str(file_path),
+                            "section": sec_title or "Introduction",
+                            "section_path": section_path,
+                            "heading_level": lvl,
+                            "chunk_in_section": chunk_i,
+                            "section_index": sec_idx
+                        }
+                    ))
+
+        # TXT: simple read + cleaner -> flat chunking
+        elif suffix == '.txt':
+            text = self.extract_text_from_md(str(file_path))  # reuse light cleaner
+            if not text:
+                print(f"No text extracted from {file_path}")
+                return []
+            documents = self.chunk_document(text, source=str(file_path))
+
         else:
             print(f"Unsupported file type: {file_path.suffix}")
             return []
-        
-        if not text:
-            print(f"No text extracted from {file_path}")
-            return []
-        
-        # create chunks
-        documents = self.chunk_document(text, source=str(file_path))
-        print(f"Processed {file_path.name}: {len(documents)} chunks")
 
+        print(f"Processed {file_path.name}: {len(documents)} chunks")
         return documents
     
     def process_directory(self, dir_path: str) -> List[Document]:
