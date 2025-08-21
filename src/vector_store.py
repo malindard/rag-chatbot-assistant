@@ -4,10 +4,11 @@ Handles embedding creation, storage, and retrieval using FastEmbed
 """
 import os
 import pickle
-from typing import List, Tuple, Optional
 import numpy as np
-from fastembed import TextEmbedding
 import faiss
+from pathlib import Path
+from typing import List, Tuple, Optional, Dict
+from fastembed import TextEmbedding
 from langchain.docstore.document import Document
 import config
 
@@ -59,14 +60,13 @@ class VectorStore:
         """Create embeddings for list of texts using FastEmbed"""
         try:
             print(f"Creating embeddings for {len(texts)} texts...")
-            
             # fastEmbed returns a generator, convert to list
-            embeddings_gen = self.embedding_model.embed(texts)
-            embeddings_list = list(embeddings_gen)
+            embeddings_list = list(self.embedding_model.embed(texts))
+            embeddings = np.array(embeddings_list, dtype="float32")
             
-            # convert to numpy array
-            embeddings = np.array(embeddings_list)
-            
+            # l2-normalize so inner product == cosine similarity
+            norms = np.linalg.norm(embeddings, axis=1, keepdims=True) + 1e-12
+            embeddings = embeddings / norms
             print(f"Embeddings created: shape {embeddings.shape}")
             return embeddings
             
@@ -79,6 +79,9 @@ class VectorStore:
         if not documents:
             print("No documents provided for indexing")
             return False
+        if self.dimension is None:
+            print("Embedding model not initialized")
+            return False
         
         try:
             print(f"Creating FAISS index for {len(documents)} documents...")
@@ -88,9 +91,11 @@ class VectorStore:
             texts = [doc.page_content for doc in documents]
             # create embeddings
             embeddings = self.create_embeddings(texts)
-            # create FAISS index
-            self.index = faiss.IndexFlatL2(self.dimension)
-            self.index.add(embeddings.astype('float32'))
+            # create FAISS index use inner product with IDMap, embeddings l2-normalized -> cosine
+            base = faiss.IndexFlatIP(self.dimension)
+            self.index = faiss.IndexIDMap(base)
+            ids = np.arange(len(embeddings), dtype="int64")
+            self.index.add_with_ids(embeddings.astype("float32"), ids)
             print(f"FAISS index created successfully with {self.index.ntotal} vectors")
             return True
             
@@ -153,45 +158,53 @@ class VectorStore:
             # create query embedding
             query_embedding = self.create_embeddings([query])
             # search FAISS index
-            distances, indices = self.index.search(query_embedding.astype('float32'), k)
+            scores, indices = self.index.search(query_embedding.astype("float32"), k)
             # return documents with similarity scores
-            results = []
-            for i, (distance, idx) in enumerate(zip(distances[0], indices[0])):
+            results: List[Tuple[Document, float]] = []
+            for score, idx in zip(scores[0], indices[0]):
+                if idx == -1:
+                    continue
                 if idx < len(self.documents):
-                    # convert L2 distance to similarity score (higher is better)
-                    similarity = 1.0 / (1.0 + distance)
-                    results.append((self.documents[idx], similarity))
+                    # score is cosine similarity in [-1, 1]
+                    results.append((self.documents[int(idx)], float(score)))
             return results
             
         except Exception as e:
             print(f"Error in similarity search: {str(e)}")
             return []
     
-    def get_relevant_context(self, query: str, max_chars: int = config.MAX_CONTEXT_LENGTH) -> str:
-        """Get relevant context for RAG system"""
-        # get similar documents
-        results = self.similarity_search(query)
-        
-        if not results:
-            return "No relevant information found."
-        
-        # combine relevant chunks into context
-        context_parts = []
-        current_chars = 0
-        
-        for doc, similarity in results:
-            doc_text = doc.page_content
-            source = doc.metadata.get('source', 'Unknown')
-            # format context with source
-            formatted_text = f"[From {source}]\n{doc_text}\n"
-            # check if adding this would exceed limit
-            if current_chars + len(formatted_text) > max_chars:
+    # --------- Convenience for RAG prompt building & citations ----------
+    def topk_with_citations(self, query: str, k: int = config.MAX_CHUNKS_FOR_CONTEXT) -> List[Dict]:
+        """Return top-k hits with compact citation strings for Markdown sections"""
+        hits = self.similarity_search(query, k=k)
+        out: List[Dict] = []
+        for doc, score in hits:
+            meta = doc.metadata or {}
+            src = Path(meta.get("source", "Unknown")).name
+            sec_path = meta.get("section_path") or meta.get("section") or ""
+            cite = f"{src}" + (f" §{sec_path}" if sec_path else "")
+            out.append({"doc": doc, "score": score, "citation": cite})
+        return out
+
+    def build_context(self, hits: List[Dict], max_chars: int = config.MAX_CONTEXT_LENGTH) -> str:
+        """Assemble context with inline source markers, bounded by max_chars"""
+        parts, total = [], 0
+        for h in hits:
+            doc: Document = h["doc"]
+            cite: str = h["citation"]
+            frag = f"[source: {cite}]\n{doc.page_content}\n"
+            if total + len(frag) > max_chars:
                 break
-            context_parts.append(formatted_text)
-            current_chars += len(formatted_text)
-        
-        context = "\n".join(context_parts)
-        return context.strip()
+            parts.append(frag)
+            total += len(frag)
+        return "\n".join(parts).strip()
+    
+    def get_relevant_context(self, query: str, max_chars: int = config.MAX_CONTEXT_LENGTH) -> str:
+        """Get relevant context for RAG system (with citations)"""
+        hits = self.topk_with_citations(query, k=config.MAX_CHUNKS_FOR_CONTEXT)
+        if not hits:
+            return "No relevant information found."
+        return self.build_context(hits, max_chars=max_chars)
     
     def get_stats(self) -> dict:
         """Get vector store statistics"""
