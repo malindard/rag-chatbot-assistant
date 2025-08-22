@@ -218,7 +218,7 @@ class DocumentProcessor:
         directory = Path(dir_path)
         all_documents = []
 
-        supported_extensions = ['.pdf', '.md', '.txt']
+        supported_extensions = ['.pdf', '.md', '.markdown', '.txt']
 
         for file_path in directory.iterdir():
             if file_path.suffix.lower() in supported_extensions:

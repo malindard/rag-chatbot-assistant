@@ -187,16 +187,26 @@ class VectorStore:
         return out
 
     def build_context(self, hits: List[Dict], max_chars: int = config.MAX_CONTEXT_LENGTH) -> str:
-        """Assemble context with inline source markers, bounded by max_chars"""
+        seen = set()
         parts, total = [], 0
         for h in hits:
             doc: Document = h["doc"]
-            cite: str = h["citation"]
+            meta = doc.metadata or {}
+            src = Path(meta.get("source", "Unknown")).name
+            sec = meta.get("section_path") or meta.get("section") or ""
+            key = (src, sec)
+            if key in seen:  # skip duplicate sections
+                continue
+            seen.add(key)
+
+            cite: str = f"{src}" + (f" §{sec}" if sec else "")
             frag = f"[source: {cite}]\n{doc.page_content}\n"
             if total + len(frag) > max_chars:
                 break
             parts.append(frag)
             total += len(frag)
+            if len(seen) >= config.MAX_DISTINCT_CITATIONS:
+                break
         return "\n".join(parts).strip()
     
     def get_relevant_context(self, query: str, max_chars: int = config.MAX_CONTEXT_LENGTH) -> str:

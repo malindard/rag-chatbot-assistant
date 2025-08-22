@@ -1,8 +1,11 @@
+import re
 from textwrap import dedent
 from langchain.docstore.document import Document
 from src.vector_store import VectorStore
 from src.llm_handler import ChatLLM
 import config
+
+CITE_RE = re.compile(r"\[source:\s*[^\]]+\]")
 
 SYSTEM_PROMPT = dedent("""
 You are an HR policy assistant.
@@ -34,6 +37,7 @@ class RAGEngine:
     def answer(self, question: str) -> str:
         # 1. retrieve
         hits = self.vs.topk_with_citations(question, k=config.MAX_CHUNKS_FOR_CONTEXT)
+        hits = [h for h in hits if h.get("score", 0.0) >= config.MIN_COSINE_SIMILARITY] # filter by cosine floor
         if not hits:
             return "❌ I couldn't find relevant information in the policy documents. Please check with HR."
 
@@ -44,12 +48,19 @@ class RAGEngine:
         user_prompt = ANSWER_TEMPLATE.format(question=question, context=context)
         try:
             text = self.llm.generate(SYSTEM_PROMPT, user_prompt)
-        except Exception:
-            return ("⚠️ The answer engine had a temporary issue processing your request. "
+        except Exception as e:
+            return (f"⚠️ The answer engine had an issue: {e}\n"
                     "Please try again, or ask a slightly shorter question.")
 
         # 4. guardrails
         if "[source:" not in text:
             return "❌ I cannot provide a verified answer from the documents. Please consult HR directly."
 
+        found = []
+        def _keep_first_n(m):
+            if len(found) < config.MAX_DISTINCT_CITATIONS:
+                found.append(m.group(0))
+                return m.group(0)
+            return ""
+        text = CITE_RE.sub(_keep_first_n, text)
         return text.strip()

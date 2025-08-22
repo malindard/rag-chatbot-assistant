@@ -35,7 +35,9 @@ OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/ap
 
 # Generation parameters
 TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.3"))        # lower = more focused, higher = more creative 
-MAX_NEW_TOKENS = int(os.getenv("LLM_MAX_NEW_TOKENS", "512"))    # max tokens in response
+MAX_NEW_TOKENS = int(os.getenv("LLM_MAX_NEW_TOKENS", "256"))
+MIN_COSINE_SIMILARITY = float(os.getenv("MIN_COSINE_SIMILARITY", "0.25"))   # max cosine similarity floor
+MAX_DISTINCT_CITATIONS = int(os.getenv("MAX_DISTINCT_CITATIONS", "3"))      # max dedupe citations
 
 CACHE_DIR = str(MODELS_DIR)
 
@@ -48,8 +50,8 @@ else:
 # Document processing settings
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "600"))    # characters per chunk
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "100"))  # overlap between chunks
-MAX_CHUNKS_FOR_CONTEXT = int(os.getenv("MAX_CHUNKS_FOR_CONTEXT", "6"))  # max relevant chunks to include in prompt
-MAX_CONTEXT_LENGTH = int(os.getenv("MAX_CONTEXT_LENGTH", "4000"))   # max context length for LLM
+MAX_CHUNKS_FOR_CONTEXT = int(os.getenv("MAX_CHUNKS_FOR_CONTEXT", "3"))  # max relevant chunks to include in prompt
+MAX_CONTEXT_LENGTH = int(os.getenv("MAX_CONTEXT_LENGTH", "2500"))   # max context length for LLM
 
 # Vector store settings
 VECTOR_STORE_PATH = str(MODELS_DIR / "faiss_index")
