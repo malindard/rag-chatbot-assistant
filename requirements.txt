@@ -1,0 +1,22 @@
+# RAG core
+fastembed
+faiss-cpu
+
+# LangChain
+langchain
+langchain-community
+langchain-openai
+openai
+
+# Web/UI
+streamlit
+
+# Document processing
+PyPDF2
+python-docx
+
+# Utilities
+numpy
+pandas
+python-dotenv
+requests
