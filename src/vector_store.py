@@ -59,7 +59,10 @@ class VectorStore:
     def create_embeddings(self, texts: List[str]) -> np.ndarray:
         """Create embeddings for list of texts using FastEmbed"""
         try:
+            if self.embedding_model is None:
+                raise ValueError("Embedding model is not initialized.")
             print(f"Creating embeddings for {len(texts)} texts...")
+            
             # fastEmbed returns a generator, convert to list
             embeddings_list = list(self.embedding_model.embed(texts))
             embeddings = np.array(embeddings_list, dtype="float32")
@@ -94,7 +97,7 @@ class VectorStore:
             # create FAISS index use inner product with IDMap, embeddings l2-normalized -> cosine
             base = faiss.IndexFlatIP(self.dimension)
             self.index = faiss.IndexIDMap(base)
-            ids = np.arange(len(embeddings), dtype="int64")
+            ids = np.arange(len(embeddings), dtype=np.int64)
             self.index.add_with_ids(embeddings.astype("float32"), ids)
             print(f"FAISS index created successfully with {self.index.ntotal} vectors")
             return True
@@ -241,7 +244,7 @@ def build_vector_store(documents: List[Document], force_rebuild: bool = False) -
         print("Vector store built and saved successfully")
     else:
         print("Failed to build vector store")
-        return None
+        return vector_store
     
     return vector_store
 
@@ -251,7 +254,7 @@ if __name__ == "__main__":
     
     # Process documents
     processor = DocumentProcessor()
-    documents = processor.process_directory(config.DATA_DIR)
+    documents = processor.process_directory(str(config.DATA_DIR))
     
     if documents:
         print(f"Found {len(documents)} document chunks to process")

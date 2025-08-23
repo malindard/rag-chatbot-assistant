@@ -251,7 +251,7 @@ class DocumentProcessor:
 if __name__ == "__main__":
     # test document processing
     processor = DocumentProcessor()
-    documents = processor.process_directory(config.DATA_DIR)
+    documents = processor.process_directory(str(config.DATA_DIR))
     stats = processor.get_doc_stats(documents)
 
     print("\nDocument Processing Results:")
