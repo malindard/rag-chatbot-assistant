@@ -1,49 +1,51 @@
 import time
 from dataclasses import dataclass
 from typing import Optional
-from openai import OpenAI
+from groq import Groq
 import config
 
 @dataclass
 class LLMConfig:
-    model: str = config.LLM_MODEL
+    model: str = getattr(config, "GROQ_MODEL")
     temperature: float = config.TEMPERATURE
     max_new_tokens: int = config.MAX_NEW_TOKENS
+    max_retries: int = config.LLM_MAX_RETRIES_PER_MODEL
+    backoff_seconds: float = config.LLM_BACKOFF_SECONDS
 
 class ChatLLM:
     def __init__(self, cfg: Optional[LLMConfig] = None):
-        if not config.OPENROUTER_API_KEY:
-            raise RuntimeError("OPENROUTER_API_KEY not set in .env")
+        if not config.GROQ_API_KEY:
+            raise RuntimeError("GROQ_API_KEY not set in .env")
         self.cfg = cfg or LLMConfig()
-        self.client = OpenAI(api_key=config.OPENROUTER_API_KEY, base_url=config.OPENROUTER_BASE_URL)
+        self.client = Groq(api_key=config.GROQ_API_KEY)
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": user_prompt},
-        ]
-
-        attempts, last_err = 0, None
-        while attempts < 2:
+        last_err = None
+        for attempt in range(1, self.cfg.max_retries + 1):
             try:
                 resp = self.client.chat.completions.create(
                     model=self.cfg.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
                     temperature=self.cfg.temperature,
                     max_tokens=self.cfg.max_new_tokens,
-                    messages=messages,
+                    stream=False,
                 )
                 return (resp.choices[0].message.content or "").strip()
             except Exception as e:
                 last_err = e
-                attempts += 1
-                # --- added debug ---
-                status = getattr(e, "status_code", None) or getattr(getattr(e, "response", None), "status_code", None)
-                body = getattr(getattr(e, "response", None), "text", None)
-                print(f"[LLM ERROR] attempt {attempts}/2 on model={self.cfg.model}")
-                if status: print(f"  status: {status}")
-                if body:   print(f"  body: {body}")
-                print(f"  exception: {repr(e)}")
-                # --------------
-                time.sleep(0.6 * attempts)
+                # basic diagnostics
+                status = getattr(e, "status", None) or getattr(getattr(e, "respond", None), "status_code", None)
+                text = getattr(getattr(e, "response", None), "text", None)
+                print(f"[GROQ ERROR] attempt{attempt}/{self.cfg.max_retries} model={self.cfg.model}")
+                if status: print(f"\nstatus: {status}")
+                if text: print(f"\nbody: {text}")
 
-        raise RuntimeError(f"LLM call failed after retries (model={self.cfg.model}): {last_err}")
+                # retry only on 5xx or unknown
+                if status in (500, 502, 503, 504) or status is None:
+                    time.sleep(self.cfg.backoff_seconds * attempt)
+                    continue
+                raise RuntimeError(f"Groq error (ststus={status}): {text or repr(e)}")
+        raise RuntimeError(f"Groq call failed after retries (model={self.cfg.model}): {repr(last_err)}")

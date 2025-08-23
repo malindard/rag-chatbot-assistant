@@ -2,11 +2,10 @@
 fastembed
 faiss-cpu
 
-# LangChain
+# LangChain & LLM
 langchain
 langchain-community
-langchain-openai
-openai
+groq
 
 # Web/UI
 streamlit

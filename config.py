@@ -2,7 +2,7 @@
 Configuration settings for RAG Chatbot Assistant
 - Embeddings: FastEmbed (BAAI/bge-small-en-v1.5)
 - Vector store: FAISS
-- Chat LLM: OpenRouter (DeepSeek by default)
+- Chat LLM: GROQ (Llama 3.1 8b)
 """
 import os
 from pathlib import Path
@@ -26,12 +26,11 @@ MODELS_DIR.mkdir(exist_ok=True)
 
 # Model configurations
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"  # fast n lightweight sentence transformer
-LLM_BACKEND = os.getenv("LLM_BACKEND", "OPENROUTER").upper()
-LLM_MODEL = os.getenv("LLM_MODEL", "deepseek/deepseek-chat-v3-0324:free")
-
-# OpenRouter API settings
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
-OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+LLM_BACKEND = os.getenv("LLM_BACKEND", "GROQ").upper()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+LLM_MAX_RETRIES_PER_MODEL = int(os.getenv("LLM_MAX_RETRIES_PER_MODEL", "2"))
+LLM_BACKOFF_SECONDS = float(os.getenv("LLM_BACKOFF_SECONDS", "1"))
 
 # Generation parameters
 TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.3"))        # lower = more focused, higher = more creative 
@@ -42,10 +41,10 @@ MAX_DISTINCT_CITATIONS = int(os.getenv("MAX_DISTINCT_CITATIONS", "3"))      # ma
 CACHE_DIR = str(MODELS_DIR)
 
 # Validate token
-if OPENROUTER_API_KEY:
-    print(f"✅ Token loaded: {OPENROUTER_API_KEY[:10]}...")
+if GROQ_API_KEY:
+    print(f"✅ Token loaded: {GROQ_API_KEY[:10]}...")
 else:
-    print("⚠️ No API key found. Set OPENROUTER_API_KEY environment variable or create .env file")
+    print("⚠️ No API key found. Set GROQ_API_KEY environment variable or create .env file")
 
 # Document processing settings
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "600"))    # characters per chunk
