@@ -1,6 +1,6 @@
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Iterator
 from groq import Groq
 import config
 
@@ -49,3 +49,27 @@ class ChatLLM:
                     continue
                 raise RuntimeError(f"Groq error (ststus={status}): {text or repr(e)}")
         raise RuntimeError(f"Groq call failed after retries (model={self.cfg.model}): {repr(last_err)}")
+
+    def generate_stream(self, system_prompt: str, user_prompt: str) -> Iterator[str]:
+        """Stream tokens as they are generated"""
+        try:
+            stream = self.client.chat.completions.create(
+                model=self.cfg.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=self.cfg.temperature,
+                max_tokens=self.cfg.max_new_tokens,
+                stream=True,
+            )
+            for chunk in stream:
+                delta = None
+                try:
+                    delta = chunk.choices[0].delta.content
+                except Exception:
+                    delta = None
+                if delta:
+                    yield delta
+        except Exception as e:
+            yield f"\n\n (stream error: {repr(e)})"

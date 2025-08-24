@@ -3,6 +3,8 @@ from textwrap import dedent
 from langchain.docstore.document import Document
 from src.vector_store import VectorStore
 from src.llm_handler import ChatLLM
+from src.bm25_retriever import BM25Retriever
+from src.hybrid_retriever import rrf_fuse
 import config
 
 CITE_RE = re.compile(r"\[source:\s*[^\]]+\]")
@@ -33,11 +35,32 @@ class RAGEngine:
     def __init__(self, vector_store: VectorStore, llm: ChatLLM):
         self.vs = vector_store
         self.llm = llm
+        self.bm25 = BM25Retriever(self.vs.documents) if config.USE_HYBRID_RETRIEVAL else None
+    
+    def _retrieve(self, question: str):
+        # dense
+        dense = self.vs.topk_with_citations(question, k=config.DENSE_TOP_K)
+        dense = [h for h in dense if h.get("score",0.0) >= config.MIN_COSINE_SIMILARITY]
+
+        if not config.USE_HYBRID_RETRIEVAL or self.bm25 is None:
+            return dense  # vector-only mode
+
+        # sparse
+        sparse = self.bm25.topk(question, k=config.BM25_TOP_K)
+        sparse = [h for h in sparse if h["score"] >= config.BM25_MIN_SCORE]
+
+        # fuse
+        fused = rrf_fuse(
+            dense_hits=[{**h, "rank": i+1} for i,h in enumerate(dense)],
+            sparse_hits=[{**h, "rank": h["rank"]} for h in sparse]
+        )
+        if not fused:
+            return dense or sparse
+        return fused
 
     def answer(self, question: str) -> str:
         # 1. retrieve
-        hits = self.vs.topk_with_citations(question, k=config.MAX_CHUNKS_FOR_CONTEXT)
-        hits = [h for h in hits if h.get("score", 0.0) >= config.MIN_COSINE_SIMILARITY] # filter by cosine floor
+        hits = self._retrieve(question)
         if not hits:
             return "❌ I couldn't find relevant information in the policy documents. Please check with HR."
 
@@ -64,3 +87,19 @@ class RAGEngine:
             return ""
         text = CITE_RE.sub(_keep_first_n, text)
         return text.strip()
+    
+    def answer_stream(self, question: str):
+        """Stream tokens as they generate"""
+        hits = self._retrieve(question)
+        if not hits:
+            # yield a one-shot refusal so streamlit displays something
+            yield ("❌ I couldn't find a confident, document-based answer. "
+                   "Please check the HR portal or contact HR.")
+            return
+
+        context = self.vs.build_context(hits, max_chars=config.MAX_CONTEXT_LENGTH)
+        user_prompt = ANSWER_TEMPLATE.format(question=question, context=context)
+
+        # delegate token streaming to the LLM client
+        for token in self.llm.generate_stream(SYSTEM_PROMPT, user_prompt):
+            yield token

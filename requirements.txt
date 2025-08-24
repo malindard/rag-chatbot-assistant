@@ -1,6 +1,7 @@
 # RAG core
 fastembed
 faiss-cpu
+rank-bm25
 
 # LangChain & LLM
 langchain

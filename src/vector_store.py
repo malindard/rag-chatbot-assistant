@@ -176,17 +176,31 @@ class VectorStore:
             print(f"Error in similarity search: {str(e)}")
             return []
     
-    # --------- Convenience for RAG prompt building & citations ----------
+    # Convenience for RAG prompt building & citations
     def topk_with_citations(self, query: str, k: int = config.MAX_CHUNKS_FOR_CONTEXT) -> List[Dict]:
         """Return top-k hits with compact citation strings for Markdown sections"""
         hits = self.similarity_search(query, k=k)
-        out: List[Dict] = []
-        for doc, score in hits:
+        out = []
+        for rank, (doc, score) in enumerate(hits, start=1):
             meta = doc.metadata or {}
-            src = Path(meta.get("source", "Unknown")).name
+            src_name = Path(meta.get("source", "Unknown")).name  # filename
             sec_path = meta.get("section_path") or meta.get("section") or ""
-            cite = f"{src}" + (f" §{sec_path}" if sec_path else "")
-            out.append({"doc": doc, "score": score, "citation": cite})
+            chunk_idx = meta.get("chunk_index",
+                        meta.get("chunk_in_section", rank - 1))  # consistent key
+
+            citation = f"{src_name}" + (f" §{sec_path}" if sec_path else "")
+            uid = (src_name, sec_path, chunk_idx)                # ligns with BM25
+
+            out.append({
+                "doc": doc,
+                "score": float(score),
+                "rank": rank,
+                "source": src_name,
+                "section_path": sec_path,
+                "chunk_index": chunk_idx,
+                "citation": citation,
+                "uid": uid,
+            })
         return out
 
     def build_context(self, hits: List[Dict], max_chars: int = config.MAX_CONTEXT_LENGTH) -> str:

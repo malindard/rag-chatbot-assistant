@@ -35,7 +35,7 @@ LLM_BACKOFF_SECONDS = float(os.getenv("LLM_BACKOFF_SECONDS", "1"))
 # Generation parameters
 TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.3"))        # lower = more focused, higher = more creative 
 MAX_NEW_TOKENS = int(os.getenv("LLM_MAX_NEW_TOKENS", "256"))
-MIN_COSINE_SIMILARITY = float(os.getenv("MIN_COSINE_SIMILARITY", "0.25"))   # max cosine similarity floor
+MIN_COSINE_SIMILARITY = float(os.getenv("MIN_COSINE_SIMILARITY", "0.15"))   # max cosine similarity floor
 MAX_DISTINCT_CITATIONS = int(os.getenv("MAX_DISTINCT_CITATIONS", "3"))      # max dedupe citations
 
 CACHE_DIR = str(MODELS_DIR)
@@ -60,10 +60,16 @@ PAGE_TITLE = "Chatbot Assistant"
 PAGE_ICON = "🤖"
 LAYOUT = "wide"
 
-# Sample HR documents
-HR_DOCUMENTS = [
-    "employee_leave_policy.md",
-    "remote_work_guidelines.md",
-    "performance_review.md",
-    "code_of_conduct.md",
-]
+# Hybrid retrieval toggles
+USE_HYBRID_RETRIEVAL = True  # flip to enable/disable
+
+# BM25
+BM25_TOP_K = int(os.getenv("BM25_TOP_K", "20"))
+BM25_MIN_SCORE = float(os.getenv("BM25_MIN_SCORE", "0.1"))
+
+# Dense
+DENSE_TOP_K = int(os.getenv("DENSE_TOP_K", "6"))
+
+# RRF
+RRF_K = int(os.getenv("RRF_K", "60"))
+FUSED_TOP_K = int(os.getenv("FUSED_TOP_K", str(MAX_CHUNKS_FOR_CONTEXT)))
