@@ -5,7 +5,7 @@ It uses **hybrid retrieval (FAISS + BM25 + RRF)** and a **Groq LLM backend** to 
 
 🎯 [Live Demo](https://rag-chatbot-assistant.streamlit.app/)  
 
-![Python](https://img.shields.io/badge/Python-3.10+-blue)
+![Python](https://img.shields.io/badge/Python-3.11+-blue)
 ![Streamlit](https://img.shields.io/badge/Streamlit-App-orange)
 ![FAISS](https://img.shields.io/badge/FAISS-VectorStore-green)
 ![Groq](https://img.shields.io/badge/Groq-LLM-purple)
@@ -42,8 +42,8 @@ Think of this as your personal **AI knowledge assistant**. With your uploaded do
 ## 💻 Run It Locally
 
 ```bash
-git clone https://github.com/yourusername/ask-your-docs.git
-cd ask-your-docs
+git clone https://github.com/malindard/rag-chatbot-assistant.git
+cd rag-chatbot-assistant
 pip install -r requirements.txt
 ```
 
