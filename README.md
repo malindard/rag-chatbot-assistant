@@ -1,7 +1,7 @@
 # 🤖 Ask Your Docs – RAG-Powered Document Q&A
 
-Welcome to **Ask Your Docs**, a document-based chatbot that lets you upload files and instantly query them.  
-It uses **hybrid retrieval (FAISS + BM25 + RRF)** and a **Groq LLM backend** to give concise answers with verified citations — no hallucinations.
+Welcome to **Ask Your Docs**, a document-based assistant where users can upload files and instantly query them.  
+It uses **hybrid retrieval (FAISS + BM25 + RRF)** and a **Groq LLM backend** to return concise, citation-backed answers — no hallucinations.
 
 🎯 [Live Demo](https://rag-chatbot-assistant.streamlit.app/)  
 
@@ -13,29 +13,62 @@ It uses **hybrid retrieval (FAISS + BM25 + RRF)** and a **Groq LLM backend** to 
 
 ---
 
-## ✨ What It Does
+## ✨ Features
 
-Think of this as your personal **AI knowledge assistant**. With your uploaded docs, it:
-
-1. **Processes** PDF / Markdown / TXT files into clean text chunks  
-2. **Indexes** them with dense embeddings (FAISS + FastEmbed)  
-3. **Fuses** dense & sparse results using Reciprocal Rank Fusion  
-4. **Answers** your questions *only* from the docs — with citations  
-5. **Runs** in a Streamlit chat UI for quick interaction  
+- 📄 **Document Upload** – Accepts PDF, Markdown, and TXT  
+- 🔎 **Hybrid Retrieval** – Combines dense embeddings (FAISS) + sparse search (BM25) with Reciprocal Rank Fusion  
+- 📑 **Verified Answers** – Uses only uploaded docs with inline citations  
+- 💬 **Chat UI** – Streamlit-based interface for interactive Q&A  
+- ⚡ **LLM Backend** – Powered by Groq (Llama-3.1-8B/70B Instant) for low-latency inference  
 
 ---
 
 ## 🧰 Tech Stack
 
-| Tool             | Role                                   |
-|------------------|----------------------------------------|
-| FastEmbed        | Text embeddings (BAAI/bge-small-en-v1.5) |
-| FAISS            | Vector store for similarity search |
-| BM25 (rank-bm25) | Sparse keyword retrieval |
-| RRF Fusion       | Combines dense & sparse hits |
-| Groq (Llama 3.1) | Chat LLM backend |
-| Streamlit        | Frontend UI |
-| PyPDF2 / LangChain | Document parsing & chunking |
+| Tool               | Role |
+|--------------------|------|
+| **FastEmbed**      | Dense embeddings (`BAAI/bge-small-en-v1.5`) |
+| **FAISS**          | Vector similarity search |
+| **BM25**           | Sparse keyword retrieval |
+| **RRF Fusion**     | Combines dense & sparse hits |
+| **Groq LLM**       | Answer generation (via Groq API) |
+| **Streamlit**      | Frontend UI |
+| **PyPDF2 / Markdown** | Document parsing & chunking |
+
+---
+
+## 📁 Project Structure
+
+```
+├── streamlit_app.py           # Streamlit chat interface
+├── api/
+│   └── main.py                # FastAPI entrypoint (REST API)
+├── rag_chatbot/
+│   ├── indexing/              # Document parsing & chunking
+│   │   └── document_processor.py
+│   ├── retrievers/            # Retrieval logic
+│   │   ├── bm25_retriever.py
+│   │   └── hybrid_retriever.py
+│   ├── stores/                # Vector storage
+│   │   └── vector_store.py
+│   ├── llm/                   # LLM integration
+│   │   └── llm_handler.py
+│   └── pipeline/              # Orchestration (RAG engine)
+│       └── rag_system.py
+├── config.py                  # Configs & hyperparams
+├── requirements.txt
+└── README.md
+```
+
+---
+
+## 🚀 Project Highlights
+
+- Designed and implemented a **hybrid RAG pipeline** with Reciprocal Rank Fusion (RRF) to combine FAISS (dense) and BM25 (sparse) retrievals.  
+- Built **Streamlit frontend** for interactive Q&A and **FastAPI backend** for REST-based integration.  
+- Added **document upload capability** allowing users to query their own PDFs, Markdown, or TXT files.  
+- Integrated **Groq LLM (Llama-3.1-8B Instant)** for low-latency, streaming responses.  
+- Implemented **citation toggle** to improve UX (answers can be shown with or without sources).  
 
 ---
 
@@ -53,42 +86,33 @@ Create a `.env` file:
 GROQ_API_KEY=your_api_key_here
 ```
 
-Run the app:
+Run the Streamlit app:
 
 ```bash
 streamlit run streamlit_app.py
 ```
 
----
+Or run the API:
 
-## 📁 Project Structure
-
-```
-├── streamlit_app.py        # Streamlit chat interface
-├── src/
-│   ├── document_processor.py  # PDF/MD/TXT processing & chunking
-│   ├── vector_store.py        # FAISS + embeddings
-│   ├── bm25_retriever.py      # Sparse keyword search
-│   ├── hybrid_retriever.py    # Reciprocal Rank Fusion
-│   ├── rag_system.py          # RAG engine (retrieval + LLM)
-│   └── llm_handler.py         # Groq LLM client
-├── config.py                # Centralized configs
-├── requirements.txt
-└── README.md
+```bash
+uvicorn api.main:app --reload
 ```
 
 ---
 
 ## ⚠️ Notes
 
-- Answers are **strictly from uploaded documents** — no guessing.  
+- Answers are **strictly from uploaded documents** — no fabrication.  
 - Citations appear like:  
   > “Employees are entitled to 12 days of annual leave.” [source: policy.pdf §Leave Policy]  
-- If a detail is missing, it will say:  
+- If missing:  
   > “Not specified in the provided documents.”
 
 ---
 
 ## 📄 License
 
-This project is open source under the **MIT License** — fork it, build on top, or showcase it!
+MIT License — free to use, fork, and extend.  
+
+🙌 Contributions are welcome!  
+Feel free to **open an issue** for bugs, suggestions, or questions, and send a **pull request** if you'd like to improve the project.  

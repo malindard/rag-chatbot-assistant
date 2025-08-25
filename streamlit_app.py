@@ -6,10 +6,10 @@ from pathlib import Path
 import streamlit as st
 
 import config
-from src.document_processor import DocumentProcessor
-from src.vector_store import VectorStore, build_vector_store
-from src.llm_handler import ChatLLM
-from src.rag_system import RAGEngine
+from rag_chatbot.indexing.document_processor import DocumentProcessor
+from rag_chatbot.stores.vector_store import VectorStore, build_vector_store
+from rag_chatbot.llm.llm_handler import ChatLLM
+from rag_chatbot.pipeline.rag_system import RAGEngine
 
 st.set_page_config(page_title=config.PAGE_TITLE, page_icon=config.PAGE_ICON, layout=config.LAYOUT)
 

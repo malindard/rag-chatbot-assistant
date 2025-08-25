@@ -7,10 +7,10 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import config
-from src.document_processor import DocumentProcessor
-from src.vector_store import VectorStore, build_vector_store
-from src.rag_system import RAGEngine, DEFAULT_REFUSAL
-from src.llm_handler import ChatLLM
+from rag_chatbot.indexing.document_processor import DocumentProcessor
+from rag_chatbot.stores.vector_store import VectorStore, build_vector_store
+from rag_chatbot.pipeline.rag_system import RAGEngine, DEFAULT_REFUSAL
+from rag_chatbot.llm.llm_handler import ChatLLM
 
 # global singletons
 ENGINE_LOCK = threading.Lock()

@@ -264,7 +264,7 @@ def build_vector_store(documents: List[Document], force_rebuild: bool = False) -
 
 if __name__ == "__main__":
     # Test vector store functionality
-    from .document_processor import DocumentProcessor
+    from ..indexing.document_processor import DocumentProcessor
     
     # Process documents
     processor = DocumentProcessor()

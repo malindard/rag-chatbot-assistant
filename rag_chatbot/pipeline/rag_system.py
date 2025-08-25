@@ -2,10 +2,10 @@ import re
 from typing import Optional
 from textwrap import dedent
 from langchain.docstore.document import Document
-from src.vector_store import VectorStore
-from src.llm_handler import ChatLLM
-from src.bm25_retriever import BM25Retriever
-from src.hybrid_retriever import rrf_fuse
+from rag_chatbot.stores.vector_store import VectorStore
+from rag_chatbot.llm.llm_handler import ChatLLM
+from rag_chatbot.retrievers.bm25_retriever import BM25Retriever
+from rag_chatbot.retrievers.hybrid_retriever import rrf_fuse
 import config
 
 CITE_RE = re.compile(r"\[source:\s*[^\]]+\]")
