@@ -1,181 +1,240 @@
+# app/streamlit_app.py
+import os
 import re
-import streamlit as st
 import hashlib
 from pathlib import Path
+import streamlit as st
+
 import config
 from src.document_processor import DocumentProcessor
 from src.vector_store import VectorStore, build_vector_store
 from src.llm_handler import ChatLLM
 from src.rag_system import RAGEngine
 
-# -----------------------------
+st.set_page_config(page_title=config.PAGE_TITLE, page_icon=config.PAGE_ICON, layout=config.LAYOUT)
+
+# ---------------------------
 # Helpers
-# -----------------------------
-@st.cache_resource(show_spinner=False)
-def get_vector_store():
-    vs = VectorStore()
-    if not vs.load_index(config.VECTOR_STORE_PATH):
-        st.info("No existing vector store found. Building a new one from data/ ...")
-        proc = DocumentProcessor()
-        docs = proc.process_directory(str(config.DATA_DIR))
-        if not docs:
-            st.warning("No documents found in data/. Please add .md or .markdown files and click 'Rebuild index'.")
-            return None
-        vs_built = build_vector_store(docs, force_rebuild=True)
-        return vs_built
-    return vs
-
-@st.cache_resource(show_spinner=False)
-def get_llm():
-    return ChatLLM()
-
-def ensure_engine():
-    vs = get_vector_store()
-    if vs is None:
-        return None
-    llm = get_llm()
-    return RAGEngine(vs, llm)
-
-def rebuild_index(show_toast=True):
-    try:
-        proc = DocumentProcessor()
-        docs = proc.process_directory(str(config.DATA_DIR))
-        if not docs:
-            st.error("No documents found in data/. Add .md files first.")
-            return False
-        # Build fresh store
-        _ = build_vector_store(docs, force_rebuild=True)
-        # Clear cached vector store
-        get_vector_store.clear()
-        if show_toast:
-            st.toast("Index rebuilt ✅", icon="✅")
-        return True
-    except Exception as e:
-        st.error(f"Failed to rebuild index: {e}")
-        st.exception(e)
-        return False
-
-def show_stats(vs: VectorStore):
-    stats = vs.get_stats()
-    st.metric("Chunks", stats["total_documents"])
-    st.metric("Vectors", stats["total_vectors"])
-    st.caption(f"Embedding dim: {stats['embedding_dimension']} | Model: {stats['model_name']}")
+# ---------------------------
 
 CITE_RE = re.compile(r"\[source:\s*[^\]]+\]")
+
 def strip_citations(text: str) -> str:
-    # remove citation markers and tidy whitespsce
     cleaned = CITE_RE.sub("", text)
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
 
-# -----------------------------
-# UI
-# -----------------------------
-st.set_page_config(page_title=config.PAGE_TITLE, page_icon=config.PAGE_ICON, layout=config.LAYOUT)
-st.title("HR Policy RAG Assistant")
-st.caption("Grounded answers + citations from your Markdown policy docs.")
+def _has_any_docs() -> bool:
+    data_dir = Path(config.DATA_DIR)
+    if not data_dir.exists():
+        return False
+    allowed = {".md", ".markdown", ".txt", ".pdf"}
+    return any(p.suffix.lower() in allowed for p in data_dir.glob("*"))
+
+def _has_index() -> bool:
+    base = Path(config.VECTOR_STORE_PATH)
+    return base.with_suffix(".index").exists() and base.with_suffix(".docs").exists()
+
+def _safe_name(name: str) -> str:
+    return name.replace("\\", "_").replace("/", "_").strip()
+
+def _dedup_save(upload, folder: Path) -> str:
+    raw = upload.read()
+    digest = hashlib.sha256(raw).hexdigest()[:12]
+    safe = _safe_name(upload.name)
+    target = folder / f"{digest}_{safe}"
+    if not target.exists():
+        target.write_bytes(raw)
+        return f"Saved: {upload.name}"
+    return f"Duplicate skipped: {upload.name}"
+
+# ---------------------------
+# Cached resources
+# ---------------------------
+
+@st.cache_resource(show_spinner=False)
+def get_vector_store():
+    """Load an existing FAISS index if present. Do NOT auto-build."""
+    vs = VectorStore()
+    if vs.load_index(config.VECTOR_STORE_PATH):
+        return vs
+    return None
+
+def _clear_vs_cache():
+    try:
+        get_vector_store.clear()
+    except Exception:
+        pass
+
+def ensure_engine():
+    """Return a cached RAGEngine if index is present and loadable, else None."""
+    if "engine" in st.session_state and st.session_state.engine:
+        return st.session_state.engine
+
+    vs = get_vector_store()
+    if not vs:
+        return None
+
+    llm = ChatLLM()
+    engine = RAGEngine(vs, llm)
+    st.session_state.engine = engine
+    return engine
+
+def rebuild_index():
+    """Process documents and rebuild FAISS index."""
+    processor = DocumentProcessor()
+    docs = processor.process_directory(str(config.DATA_DIR))
+    vs = build_vector_store(docs, force_rebuild=True)
+    if vs:
+        _clear_vs_cache()  # refresh the cached loader
+        st.session_state.engine = RAGEngine(vs, ChatLLM())
+        return True
+    return False
+
+def reset_workspace():
+    """Clear data and models; force user to upload and rebuild."""
+    try:
+        import shutil
+        shutil.rmtree(Path(config.DATA_DIR), ignore_errors=True)
+        shutil.rmtree(Path(config.MODELS_DIR), ignore_errors=True)
+    except Exception:
+        pass
+    Path(config.DATA_DIR).mkdir(parents=True, exist_ok=True)
+    Path(config.MODELS_DIR).mkdir(parents=True, exist_ok=True)
+    _clear_vs_cache()
+    st.session_state.engine = None
+    st.session_state.messages = []
+
+# ---------------------------
+# Sidebar
+# ---------------------------
 
 with st.sidebar:
-    st.subheader("Controls")
-    st.subheader("📤 Upload HR Documents")
-    uploaded_files = st.file_uploader(
-        "Upload HR policies (.pdf, .md, .txt)", 
-        type=["pdf", "md", "txt"], 
+    st.title("Controls")
+
+    if st.button("Reset (clear data & index)", use_container_width=True):
+        reset_workspace()
+        st.success("Workspace reset. Upload documents to begin.")
+        st.stop()
+
+    st.subheader("📤 Upload documents")
+    uploads = st.file_uploader(
+        "Add .md / .txt / .pdf and then build the index",
+        type=["md", "markdown", "txt", "pdf"],
         accept_multiple_files=True
     )
-    if uploaded_files:
+    if uploads:
         data_dir = Path(config.DATA_DIR)
         data_dir.mkdir(parents=True, exist_ok=True)
-        for f in uploaded_files:
-            # Deduplicate using hash
-            raw = f.read()
-            sha = hashlib.sha256(raw).hexdigest()[:12]
-            safe_name = f"{sha}_{f.name}"
-            out_path = data_dir / safe_name
+        msgs = []
+        for f in uploads:
+            msgs.append(_dedup_save(f, data_dir))
+        for m in msgs:
+            st.write("• " + m)
+        st.warning("Uploaded. Click **Rebuild index** below.")
 
-            if not out_path.exists():
-                with open(out_path, "wb") as fout:
-                    fout.write(raw)
-                st.success(f"Saved: {f.name}")
+    if st.button("Rebuild index", type="primary", use_container_width=True):
+        with st.spinner("Indexing…"):
+            ok = rebuild_index()
+            if ok:
+                st.success("Index built. You can start chatting.")
             else:
-                st.info(f"Skipped duplicate: {f.name}")
-
-        st.warning("ℹ️ Uploaded docs saved. Click 'Rebuild index' below to include them.")
-        
-    if st.button("🔁 Rebuild index", use_container_width=True):
-        rebuild_index()
+                st.error("Index build failed. Check logs.")
 
     st.subheader("Display")
-    show_citations = st.checkbox("Show sources (citations)", value=True, help="Toggle inline [source: ...] markers")
+    show_citations = st.checkbox(
+        "Show sources (citations)",
+        value=True,
+        help="Toggle inline [source: ...] markers"
+    )
 
-    st.divider()
     st.subheader("Config (read-only)")
-    st.write(f"**Data dir:** `{config.DATA_DIR}`")
-    st.write(f"**Vector store:** `{config.VECTOR_STORE_PATH}`")
-    st.write(f"**LLM model:** `{getattr(config, 'GROQ_MODEL', 'N/A')}`")
-    st.write(f"**Max chunks:** {config.MAX_CHUNKS_FOR_CONTEXT}")
-    st.write(f"**Max context chars:** {config.MAX_CONTEXT_LENGTH}")
-    st.write(f"**Temperature:** {config.TEMPERATURE}")
-    st.write(f"**Max tokens:** {config.MAX_NEW_TOKENS}")
-    st.write(f"**Min cosine:** {getattr(config, 'MIN_COSINE_SIMILARITY', 0.25)}")
+    st.code(
+        f"Data dir:   {config.DATA_DIR}\n"
+        f"Models dir: {config.MODELS_DIR}\n"
+        f"LLM model:  {getattr(config, 'GROQ_MODEL', 'llama-3.1-8b-instant')}\n"
+        f"Hybrid:     {getattr(config, 'USE_HYBRID_RETRIEVAL', False)}",
+        language="bash"
+    )
 
-    st.divider()
-    vs_cached = get_vector_store()
-    if vs_cached:
-        st.subheader("Index stats")
-        show_stats(vs_cached)
+# ---------------------------
+# Main layout
+# ---------------------------
 
-# Initialize chat history
+st.title("Ask Your Docs")
+st.caption("👋 Welcome! Upload your documents on the left. I’ll build an index and let you query them instantly.")
+
+# Onboarding gate: require docs & index before chatting
+if not _has_any_docs():
+    st.info("No documents found. Upload .md/.txt/.pdf in the sidebar, then click **Rebuild index**.")
+    st.stop()
+
+if not _has_index():
+    st.warning("Documents exist, but the index has not been built yet. Click **Rebuild index** in the sidebar.")
+    st.stop()
+
+engine = ensure_engine()
+if engine is None:
+    st.error("Index could not be loaded. Try clicking **Rebuild index** again.")
+    st.stop()
+
+# Chat history
 if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {"role": "assistant", "content": "Hi! Ask an HR policy question (e.g., *How many sick days do I get?*)."}
-    ]
+    st.session_state.messages = []
 
-# Chat history display
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+# System hello (only first time)
+if not st.session_state.messages:
+    with st.chat_message("assistant"):
+        st.markdown(
+            "Hi! I answer **only** from your uploaded documents. "
+            "Ask something like: _“What's the main topic of this document?_"
+        )
+
+# Render past messages
+for m in st.session_state.messages:
+    with st.chat_message(m["role"]):
+        st.markdown(m["content"])
 
 # Chat input
-user_q = st.chat_input("Type your HR question...")
+user_q = st.chat_input("Type your question…")
 if user_q:
     st.session_state.messages.append({"role": "user", "content": user_q})
     with st.chat_message("user"):
         st.markdown(user_q)
 
     with st.chat_message("assistant"):
-        engine = ensure_engine()
-        if engine is None:
-            st.error("Vector store is not ready. Add documents to data/ and click 'Rebuild index'.")
-        else:
-            with st.spinner("Thinking..."):
-                try:
-                    if show_citations:
-                        # with streaming text
-                        final_text = st.write_stream(engine.answer_stream(user_q))
-                    else:
-                        # stream but render a live, citation free
-                        placeholder = st.empty()
-                        buf = []
-                        for token in engine.answer_stream(user_q):
-                            buf.append(token)
-                            cleaned = strip_citations("".join(buf))
-                            placeholder.markdown(cleaned)
-                        final_text = strip_citations("".join(buf))
-                except Exception as e:
-                    # Show detailed error inline so you can debug free-route issues
-                    st.error("The answer engine had an issue.")
-                    st.code(f"{e}")
-                    final_text = ("⚠️ The answer engine had a temporary issue processing your request. "
-                                  "Please try again or switch model in your .env.")
-            # post-check: if no citations present, append a gentle notice
-            if show_citations and "[source:" not in final_text:
-                st.info("ℹ️ No verified source detected. If this seems incorrect, try a more specific question or contact HR.")
-            if not show_citations:
-                st.caption("Sources hidden (toggle in the sidebar to show).")
-st.divider()
-st.caption(
-    "Answers are derived only from your local policy documents. "
-    "If context is missing or weak, the assistant will refuse and suggest contacting HR."
-)
+        with st.spinner("Thinking…"):
+            try:
+                if show_citations:
+                    # Stream raw tokens (with citations)
+                    final_text = st.write_stream(engine.answer_stream(user_q))
+                else:
+                    # Live stream but render a citation-free view
+                    placeholder = st.empty()
+                    buf = []
+                    for token in engine.answer_stream(user_q):
+                        buf.append(token)
+                        cleaned = strip_citations("".join(buf))
+                        placeholder.markdown(cleaned)
+                    final_text = strip_citations("".join(buf))
+            except Exception as e:
+                st.error("The answer engine had an issue.")
+                st.code(f"{e}")
+                final_text = ("⚠️ The answer engine had a temporary issue processing your request. "
+                              "Please try again later.")
+
+        # Post-check / UX notes
+        if show_citations and "[source:" not in final_text:
+            st.info("ℹ️ No verified source detected. Try a more specific question or rebuild your index.")
+        if not show_citations:
+            st.caption("Sources hidden (toggle in the sidebar to show).")
+
+        st.session_state.messages.append({"role": "assistant", "content": final_text})
+
+# (Optional) simple debug expander for retrieval signals
+with st.expander("Debug: paths & status"):
+    st.write(f"Has docs: {_has_any_docs()} | Has index: {_has_index()}")
+    st.write(f"DATA_DIR: {config.DATA_DIR}")
+    st.write(f"MODELS_DIR: {config.MODELS_DIR}")
+    st.write(f"VECTOR_STORE_PATH: {config.VECTOR_STORE_PATH}")

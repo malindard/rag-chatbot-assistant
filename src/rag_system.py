@@ -10,12 +10,19 @@ import config
 CITE_RE = re.compile(r"\[source:\s*[^\]]+\]")
 
 SYSTEM_PROMPT = dedent("""
-You are an HR policy assistant.
-Follow these rules strictly:
-1) Use ONLY the provided CONTEXT. Do not use outside knowledge.
-2) Include 1–3 citations in the exact form: [source: filename §Section].
-3) If the answer is not clearly supported, say you don't know and suggest contacting HR.
-4) Do not provide legal or medical advice.
+                       You are a document-based assistant. You are working on a chatbot that requires users to upload their documents.
+                       Therefore you must follow these rules strictly:
+                       - Use ONLY the information found in the CONTEXT to answer.
+                        - If the answer is missing or unclear in the CONTEXT, say so explicitly and suggest what additional document(s) would help
+                        (e.g., “This isn’t in the provided documents — try uploading the transcript/contract/policy for …”).
+                        - Do NOT guess or invent details. If a detail is not present, write “Not specified in the provided documents.”
+                        - Include 1–3 citations for concrete claims using this format:
+                        [source: <filename>{ optional: " §" + <Section> }]
+                        (omit the section if none is available).
+                        - Keep answers concise and factual. Do not provide legal or medical advice.
+                        - If multiple documents disagree, state the discrepancy and cite each source.
+                        - Prefer lists or short paragraphs. Quote exact phrases when helpful.
+
 """).strip()
 
 ANSWER_TEMPLATE = """
@@ -27,9 +34,13 @@ CONTEXT (from policy documents):
 
 INSTRUCTIONS:
 - Answer ONLY based on the context above.
-- If not supported, say you don't know and suggest contacting HR.
-- Always add 1–3 citations like [source: filename §Section].
+- If the answer is not supported by the context, say so and suggest what to upload next.
+- Include 1–3 citations like [source: filename §Section]
 """
+
+# default fallback when retrieval returns nothing
+DEFAULT_REFUSAL = ("I couldn’t find this in the documents you provided. "
+                   "Try uploading the relevant file(s) or asking a more specific question.")
 
 class RAGEngine:
     def __init__(self, vector_store: VectorStore, llm: ChatLLM):
@@ -62,7 +73,7 @@ class RAGEngine:
         # 1. retrieve
         hits = self._retrieve(question)
         if not hits:
-            return "❌ I couldn't find relevant information in the policy documents. Please check with HR."
+            return DEFAULT_REFUSAL
 
         # 2. build context
         context = self.vs.build_context(hits, max_chars=config.MAX_CONTEXT_LENGTH)
@@ -77,7 +88,8 @@ class RAGEngine:
 
         # 4. guardrails
         if "[source:" not in text:
-            return "❌ I cannot provide a verified answer from the documents. Please consult HR directly."
+            # no verified citation found, append a gentle nudge (don’t hallucinate)
+            text = text.strip() + "\n\n" + (DEFAULT_REFUSAL)
 
         found = []
         def _keep_first_n(m):
@@ -93,8 +105,7 @@ class RAGEngine:
         hits = self._retrieve(question)
         if not hits:
             # yield a one-shot refusal so streamlit displays something
-            yield ("❌ I couldn't find a confident, document-based answer. "
-                   "Please check the HR portal or contact HR.")
+            yield (DEFAULT_REFUSAL)
             return
 
         context = self.vs.build_context(hits, max_chars=config.MAX_CONTEXT_LENGTH)
