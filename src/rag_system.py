@@ -1,4 +1,5 @@
 import re
+from typing import Optional
 from textwrap import dedent
 from langchain.docstore.document import Document
 from src.vector_store import VectorStore
@@ -69,11 +70,11 @@ class RAGEngine:
             return dense or sparse
         return fused
 
-    def answer(self, question: str) -> str:
+    def answer(self, question: str, refusal_message: Optional[str] = None) -> str:
         # 1. retrieve
         hits = self._retrieve(question)
         if not hits:
-            return DEFAULT_REFUSAL
+            return refusal_message or DEFAULT_REFUSAL
 
         # 2. build context
         context = self.vs.build_context(hits, max_chars=config.MAX_CONTEXT_LENGTH)
@@ -100,12 +101,12 @@ class RAGEngine:
         text = CITE_RE.sub(_keep_first_n, text)
         return text.strip()
     
-    def answer_stream(self, question: str):
+    def answer_stream(self, question: str, refusal_message: Optional[str] = None):
         """Stream tokens as they generate"""
         hits = self._retrieve(question)
         if not hits:
             # yield a one-shot refusal so streamlit displays something
-            yield (DEFAULT_REFUSAL)
+            yield (refusal_message or DEFAULT_REFUSAL)
             return
 
         context = self.vs.build_context(hits, max_chars=config.MAX_CONTEXT_LENGTH)

@@ -11,6 +11,10 @@ groq
 # Web/UI
 streamlit
 
+# FastAPI
+fastapi
+uvicorn
+
 # Document processing
 PyPDF2
 python-docx
@@ -18,5 +22,6 @@ python-docx
 # Utilities
 numpy
 pandas
+pydantic
 python-dotenv
 requests
